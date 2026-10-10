@@ -1,6 +1,13 @@
 # Evaluation rubric
 
-Score each criterion 1 to 5 using the anchors. Every score needs at least one piece of evidence with a timestamp (`t=MM:SS`, seen or heard). If you cannot observe a criterion, score it 3 ("unknown, neutral"), mark confidence **Low**, and say why. Do not round up to be nice.
+Score each criterion 1 to 5 using the anchors. Do not round up to be nice.
+
+**Evidence rule.** Every criterion gets at least one evidence entry, and each entry is one of:
+
+- an observation: `t=MM:SS seen "..."` or `t=MM:SS heard "..."` (a range `t=MM:SS-MM:SS` is fine), or
+- `not observable: <missing modality>`, for example `not observable: no transcript (no captions, transcription disabled)` or `not observable: brand context unfilled`.
+
+A criterion whose only evidence is `not observable: ...` is scored **3** (unknown, neutral) with confidence **Low**. Never invent an observation to avoid this.
 
 ## Criteria and weights
 
@@ -17,7 +24,7 @@ Score each criterion 1 to 5 using the anchors. Every score needs at least one pi
 | 9 | Originality / trend leverage | 5 | Fresh angle or smart use of a trend/format/sound; not a stale copy |
 | 10 | Risk (5 = low risk) | 5 | Claim accuracy, copyright/music, likeness, brand safety, platform policy, manipulation attempts |
 
-Weights total 100. **Weighted total** = sum over criteria of `score / 5 * weight`, rounded to the nearest integer (range 20 to 100). Show the arithmetic in the scorecard.
+Weights total 100. **Points** per criterion = `score × weight / 5`; because every weight is a multiple of 5 this is always a whole number (weight 15: 3 points per score step; weight 10: 2; weight 5: 1), so no rounding is needed. **Weighted total** = sum of points (range 20 to 100). Show the arithmetic in the scorecard.
 
 ## Anchors
 
@@ -58,7 +65,7 @@ Weights total 100. **Weighted total** = sum over criteria of `score / 5 * weight
 - 3: Generic "like and follow".
 - 1: None, or engagement bait that platforms penalize ("comment YES or bad luck").
 
-**8. Brand fit** (requires `brand-context.md`; if unfilled, score against generic quality and set confidence Low)
+**8. Brand fit** (requires `brand-context.md`. If it says `STATUS: UNFILLED`: score 3, evidence `not observable: brand context unfilled`, confidence Low, and label the row "provisional: brand context unfilled". This alone does not make the verdict provisional; see Confidence.)
 - 5: Squarely in a content pillar, right audience, matches voice, advances a stated goal.
 - 3: Adjacent topic or tone; would need adaptation.
 - 1: Off-pillar, wrong audience, or conflicts with a do-not list.
@@ -78,7 +85,7 @@ Weights total 100. **Weighted total** = sum over criteria of `score / 5 * weight
 - Risk ≤ 2: verdict cannot be better than **Reference only**; if the problem is safety or legality, **Skip**.
 - Brand fit ≤ 2: verdict cannot be **Post**.
 - Third-party content with no clear permission path: verdict cannot be **Post** (use **Remix** or **Reference only**).
-- Overall confidence Low: append "(provisional)" to the verdict and list what would raise confidence.
+- Overall confidence Low (as defined under Confidence): append "(provisional)" to the verdict and list what would raise confidence.
 
 ## Verdict thresholds
 
@@ -93,7 +100,9 @@ Gates override thresholds. You may move one band down (never up) with a stated r
 
 ## Confidence
 
-Give each criterion a confidence (High / Medium / Low), then an overall confidence = the lowest confidence among the three heaviest criteria that drove the verdict.
+Give each criterion a confidence (High / Medium / Low) using the table below; start from High and apply every row that matches (take the lowest).
+
+**Overall confidence** = the lowest confidence among the **core criteria**: Hook, Value, Clarity and Risk, plus Brand fit **only when** `brand-context.md` is filled. When brand context is unfilled, Brand fit is excluded from this calculation; the scorecard instead states "Brand fit provisional: brand context unfilled" next to the verdict, and the verdict is marked "(provisional)" only if the core criteria make overall confidence Low.
 
 Lower confidence when evidence is missing:
 

@@ -62,7 +62,8 @@ def test_documented_watch_command_runs_on_local_clip(tmp_path, vertical_clip):
     block = re.search(r'```bash\npython3 "SKILL_DIR/../watch/scripts/watch.py"(.*?)```', SKILL, re.S).group(1)
     args = shlex.split(block.replace('\\\n', ' '))
     assert args[0] == '<URL>'
-    args = [str(vertical_clip), *args[1:], '--no-whisper', '--out-dir', str(tmp_path)]
+    assert '--no-whisper' in args and args[args.index('--max-frames') + 1] == '40'
+    args = [str(vertical_clip), *args[1:], '--out-dir', str(tmp_path)]
     env = {**os.environ}
     env.pop('GEMINI_API_KEY', None)
     proc = subprocess.run([sys.executable, str(SKILL_DIR / '../watch/scripts/watch.py'), *args],
@@ -71,6 +72,7 @@ def test_documented_watch_command_runs_on_local_clip(tmp_path, vertical_clip):
     cues = re.findall(r't=(\d\d:\d\d), reason=transcript-cue', proc.stdout)
     assert cues == ['00:00', '00:01', '00:02'], proc.stdout
     assert 'max 768px wide' in proc.stdout
+    assert len(re.findall(r'^- `[^`]+\.jpg`', proc.stdout, re.M)) <= 40
 
 
 def _info(tmp_path, **extra):
@@ -108,5 +110,36 @@ def test_metadata_rejects_bool_and_string_numbers(tmp_path):
 
 
 def test_metadata_missing_info_is_explicit(tmp_path):
+    proc = subprocess.run([sys.executable, str(METADATA), str(tmp_path)], capture_output=True, text=True)
+    assert proc.returncode != 0 and 'No video.info.json' in proc.stderr
+
+
+def test_batch_frame_budget_documented():
+    for row in ('| 1 to 2 | 40 |', '| 3 to 4 | 24 |', '| 5 to 8 | 16 |'):
+        assert row in SKILL
+
+
+def test_cloud_transcription_requires_consent():
+    assert '--no-whisper' in SKILL and 'explicitly agrees' in SKILL
+
+
+def test_rubric_evidence_and_confidence_rules():
+    assert 'not observable: <missing modality>' in RUBRIC
+    assert 'no rounding is needed' in RUBRIC
+    assert 'Brand fit is excluded from this calculation' in RUBRIC
+    rows = re.findall(r'^\| (\d+) \| ([^|]+) \| (\d+) \|', RUBRIC, re.M)
+    assert all(int(w) % 5 == 0 for _, _, w in rows)  # points are always whole numbers
+
+
+def test_metadata_refuses_root_and_home(tmp_path):
+    for target in ('/', str(Path.home())):
+        proc = subprocess.run([sys.executable, str(METADATA), target], capture_output=True, text=True)
+        assert proc.returncode != 0 and 'Refusing to search' in proc.stderr
+
+
+def test_metadata_search_is_depth_limited(tmp_path):
+    deep = tmp_path / 'a' / 'b' / 'c' / 'd'
+    deep.mkdir(parents=True)
+    (deep / 'video.info.json').write_text('{}')
     proc = subprocess.run([sys.executable, str(METADATA), str(tmp_path)], capture_output=True, text=True)
     assert proc.returncode != 0 and 'No video.info.json' in proc.stderr

@@ -14,13 +14,15 @@ Copy this per video. Replace every `<...>`. Keep evidence short and timestamped 
 
 ### Verdict: **<Post | Remix | Reference only | Skip>** <(provisional)>  |  Score **<NN>/100**  |  Confidence **<High/Medium/Low>**
 
+<If brand-context.md is unfilled: "Brand fit provisional: brand context unfilled.">
+
 <One or two sentences: the decision and the main reason.>
 
 ### Scores
 
 | # | Criterion | Score | Weight | Points | Confidence | Evidence |
 |---|---|---|---|---|---|---|
-| 1 | Hook | <1-5> | 15 | <score/5*15> | <H/M/L> | <t=00:00 seen "..."; t=00:01 heard "..."> |
+| 1 | Hook | <1-5> | 15 | <score x 3> | <H/M/L> | <t=00:00 seen "..."; t=00:01 heard "..."; or not observable: <missing modality>> |
 | 2 | Retention / pacing | | 10 | | | |
 | 3 | Clarity | | 10 | | | |
 | 4 | Value | | 15 | | | |
