@@ -7,7 +7,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+import pytest
+
+# Local path adjustment: ROOT / 'skills/watch' resolves to <repo>/.claude/skills/watch.
+ROOT = Path(__file__).resolve().parents[2] / '.claude'
 
 
 def test_frontmatter_uses_only_agent_skills_keys():
@@ -18,6 +21,7 @@ def test_frontmatter_uses_only_agent_skills_keys():
     assert keys <= {'name', 'description', 'license', 'allowed-tools', 'metadata', 'compatibility'}
 
 
+@pytest.mark.skip(reason='Local: upstream plugin manifests (.claude-plugin/, .codex-plugin/) are not vendored')
 def test_release_versions_match_canonical_skill():
     skill = ROOT / 'skills/watch/SKILL.md'
     version = re.search(r'^  version: "([^"]+)"', skill.read_text(encoding='utf-8'), re.M).group(1)

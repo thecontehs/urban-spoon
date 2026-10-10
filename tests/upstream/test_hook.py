@@ -8,6 +8,10 @@ import pytest
 
 HOOK = Path(__file__).resolve().parents[1] / 'hooks/scripts/check-setup.sh'
 
+# Local: upstream's plugin hook (hooks/scripts/check-setup.sh) is not vendored; this repo uses
+# its own SessionStart hook in .claude/hooks/ instead.
+pytestmark = pytest.mark.skip(reason='upstream plugin hook not vendored')
+
 
 @pytest.mark.parametrize('code', [0, 2])
 def test_hook_handles_setup_failure_and_spaced_plugin_path(tmp_path, code):

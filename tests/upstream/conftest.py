@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 # Make the bundled scripts importable (mirrors watch.py's sys.path insert).
-SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "skills" / "watch" / "scripts"
+# Local path adjustment: vendored skill lives at <repo>/.claude/skills/watch.
+SCRIPTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "skills" / "watch" / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 
