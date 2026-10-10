@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# Virtual environments (keep them outside the repo; these are a safety net)
+.venv/
+venv/
+env/
+.tools/
+# Secrets
+.env
+.env.*
+*.cookies
+cookies.txt
+# watch work dirs and downloaded or generated media
+watch-*/
+run-*/
+work/
+output/
+dist/
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.m4v
+*.m4a
+*.mp3
+*.wav
+*.jpg
+*.jpeg
+*.png
+*.vtt
+*.srt
+*.info.json
