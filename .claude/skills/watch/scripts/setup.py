@@ -173,6 +173,12 @@ def _status(detailed=False):
             tools[name] = {'path': path, **(_probe([path, '--version' if name == 'yt-dlp' else '-version']) if path else {'ok': False})}
         ytdlp = _which('yt-dlp')
         result['tools'] = tools
+        # LOCAL PATCH: report the security version floor that download.py enforces.
+        from download import MIN_YTDLP_VERSION, parse_ytdlp_version
+        found = parse_ytdlp_version((tools['yt-dlp'].get('version_line') or '')) if ytdlp else None
+        result['ytdlp_security'] = {'min_version': '.'.join(f'{n:02d}' if i else str(n) for i, n in enumerate(MIN_YTDLP_VERSION)),
+                                    'version_ok': bool(found and found >= MIN_YTDLP_VERSION),
+                                    'config_files': 'ignored (--ignore-config)'}
         result['youtube'] = {
             'deno': _which('deno'), 'node': _which('node'),
             'ejs': 'unknown (inspect the owning yt-dlp installation; no network probe)',
@@ -247,6 +253,12 @@ def _ensure_uv():
         if not _which('brew'):
             raise SystemExit('WhisperX setup needs uv. Install Homebrew from https://brew.sh, then rerun setup.')
         _install_step(['brew', 'install', 'uv'], 'Install uv')
+    elif system in ('Windows', 'Linux') and os.environ.get('WATCH_ALLOW_REMOTE_INSTALLER') != '1':
+        # LOCAL PATCH (urban-spoon, see ../UPSTREAM.md): the branches below download and execute an
+        # unpinned remote installer script. Require an explicit, reviewed opt-in.
+        raise SystemExit('WhisperX setup needs uv, which is not installed. Install uv yourself with a package '
+                         'manager (e.g. pipx install uv), or, after reviewing docs/SECURITY_REVIEW.md, set '
+                         'WATCH_ALLOW_REMOTE_INSTALLER=1 to let setup run the astral.sh installer script.')
     elif system == 'Windows':
         _install_step(['powershell', '-NoProfile', '-ExecutionPolicy', 'ByPass', '-c', 'irm https://astral.sh/uv/install.ps1 | iex'], 'Install uv')
     elif system == 'Linux':

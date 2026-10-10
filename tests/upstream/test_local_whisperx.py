@@ -191,6 +191,7 @@ def test_cpu_installer_recipe_keeps_torch_out_of_cuda_index(monkeypatch, system)
 
 @pytest.mark.parametrize('system', ['Darwin', 'Linux', 'Windows'])
 def test_uv_bootstrap_discovers_new_executable_without_path_refresh(monkeypatch, system):
+    monkeypatch.setenv('WATCH_ALLOW_REMOTE_INSTALLER', '1')  # LOCAL TEST CHANGE: opt-in now required
     commands = []
     monkeypatch.setattr(setup.platform, 'system', lambda: system)
     monkeypatch.setattr(setup, '_which', lambda name: '/fake/brew' if name == 'brew' else None)
@@ -207,6 +208,7 @@ def test_uv_bootstrap_discovers_new_executable_without_path_refresh(monkeypatch,
 
 
 def test_failed_uv_download_does_not_execute_shell(monkeypatch):
+    monkeypatch.setenv('WATCH_ALLOW_REMOTE_INSTALLER', '1')  # LOCAL TEST CHANGE: opt-in now required
     monkeypatch.setattr(setup.platform, 'system', lambda: 'Linux')
     monkeypatch.setattr(setup, '_which', lambda name: None)
     commands = []

@@ -121,7 +121,9 @@ python3 "${SKILL_DIR}/scripts/watch.py" "<URL-or-local-path>" --question "<the u
 | `--cookies-from-browser BROWSER` | Explicit browser selector, including a profile if supplied; conflicts with `--cookies` |
 | `--out-dir DIR` | Create this run's disposable child directory inside DIR |
 
-Watch settings use CLI → environment → `~/.config/watch/.env` → defaults. Cookie options are opt-in and shared by metadata, caption, and media stages. If no watch cookie option is set, existing yt-dlp configuration remains active, including proxy/CA/auth settings. Do not inspect browser sessions automatically.
+Watch settings use CLI → environment → `~/.config/watch/.env` → defaults. Cookie options are opt-in and shared by metadata, caption, and media stages. Do not inspect browser sessions automatically.
+
+**Local hardening (see `UPSTREAM.md`):** watch refuses to run a yt-dlp older than 2026.06.09 and always passes `--ignore-config --no-plugin-dirs --no-exec`, so yt-dlp config files (user, system, portable) are **not** read. Proxies still work through the `HTTP_PROXY`/`HTTPS_PROXY` environment variables, and TLS trust comes from yt-dlp's defaults (certifi, or the bundle named by `SSL_CERT_FILE`/`REQUESTS_CA_BUNDLE` where the HTTP backend honors it). If a download fails with a proxy `CONNECT ... 403`, the environment's network allowlist blocks the host; do not try to bypass it.
 
 Read **every frame listed in the report** using the host's image-viewing tool; parallel reads are useful when supported. Frames are chronological and have actual source-relative timestamps. Cue frames retain their requested timestamp internally as well as the decoded frame's actual time. Combine visuals with the timestamped transcript to answer the question, citing relevant times. With no question, summarize structure, key moments, visuals, and speech. Even at transcript detail, summarize rather than paste the whole transcript unless requested.
 

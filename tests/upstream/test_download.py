@@ -133,6 +133,10 @@ def test_actual_ytdlp_exact_track_with_inherited_all(monkeypatch, tmp_path, stat
                                         'en': [{'url': (tmp_path / 'must-not-read.vtt').as_uri(), 'ext': 'vtt'}]}}
     real_run = download._run
     def stages(cmd):
+        # LOCAL TEST CHANGE: watch now passes --ignore-config, so the user config above can no
+        # longer enable file:// URLs. Inject the flag for this offline acceptance test only; the
+        # hostile '-o subtitle:elsewhere' and '--sub-langs all' lines are still present and ignored.
+        cmd = [cmd[0], '--enable-file-urls', *cmd[1:]]
         if '--load-info-json' not in cmd and '--skip-download' in cmd:
             input_info = tmp_path / 'input.info.json'
             input_info.write_text(json.dumps(raw))
