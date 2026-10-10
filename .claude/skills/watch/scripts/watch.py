@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import shutil
 import sys
 import tempfile
@@ -23,7 +24,7 @@ from download import download, fetch_captions, is_url, auth_args  # noqa: E402
 from frames import MAX_FPS, auto_fps, auto_fps_focus, extract_at_timestamps, extract_keyframes, extract_scene_or_uniform, format_time, get_metadata, merge_frames, parse_time, parse_timestamps, validate_controls  # noqa: E402
 from transcribe import filter_range, format_transcript, parse_vtt  # noqa: E402
 from whisper import load_api_key, transcribe_video  # noqa: E402
-from runtime import configure_stdio  # noqa: E402
+from runtime import configure_stdio, untrusted_block, untrusted_line  # noqa: E402  (LOCAL PATCH: sanitizers)
 
 
 LOCAL_ONLY_FLAGS = (("--detail", "detail"), ("--fps", "fps"), ("--max-frames", "max_frames"),
@@ -66,7 +67,7 @@ def run_gemini(args, config, key, start_sec, end_sec, auth) -> int:
     print()
     print("# watch: video report")
     print()
-    print(f"- **Source:** {args.source} ({sent})")
+    print(f"- **Source:** {untrusted_line(args.source, 500)} ({sent})")
     print(f"- **Engine:** {config['gemini_model']} ({result['processing'] if result else 'failed'})")
     if clip:
         print(f"- **Focus range:** {format_time(start_sec or 0)} → {format_time(end_sec) if end_sec is not None else 'end'}")
@@ -75,19 +76,20 @@ def run_gemini(args, config, key, start_sec, end_sec, auth) -> int:
     if result and result["total_tokens"] is not None:
         print(f"- **Gemini tokens:** {result['total_tokens']}")
     if warning:
-        print(f"- **Cleanup warning:** {warning}")
+        print(f"- **Cleanup warning:** {untrusted_line(warning, 500)}")
     print()
     if error:
         print("## Unavailable evidence")
         print()
-        print(f"- {error}")
+        print(f"- {untrusted_line(error, 1000)}")
         return 1
     print("## Answer (from Gemini)")
     print()
     print("_These are Gemini's observations of the video, not frames you viewed yourself. "
           "Relay them as such; rerun with `--engine local` to inspect frames directly._")
     print()
-    print(result["text"])
+    # LOCAL PATCH: Gemini's answer may repeat text from the video; fence it so it cannot forge sections.
+    print(untrusted_block(result["text"], "gemini-answer"))
     return 0
 
 
@@ -142,11 +144,16 @@ def main() -> int:
     ap.add_argument("--engine", choices=["auto", "gemini", "local"], default=None,
                     help="gemini: Google watches the video and answers (needs GEMINI_API_KEY). "
                          "local: frames + transcript on this machine. Default auto: gemini when a key exists.")
+    ap.add_argument("--allow-private-network", action="store_true",
+                    help="LOCAL PATCH: allow URLs that resolve to loopback/private/link-local addresses "
+                         "(same as WATCH_ALLOW_PRIVATE_NETWORK=1). Only for hosts you trust.")
     ap.add_argument("--question", default=None,
                     help="The user's question. Sent to Gemini on a gemini run; unused by the local engine.")
     args = ap.parse_args()
     if args.no_whisper and args.whisper:
         ap.error("--no-whisper conflicts with --whisper")
+    if args.allow_private_network:
+        os.environ["WATCH_ALLOW_PRIVATE_NETWORK"] = "1"  # read by download.check_destination
 
     config = get_config(backend_override="none" if args.no_whisper else args.whisper)
     detail = args.detail or config["detail"]
@@ -292,24 +299,24 @@ def main() -> int:
     if track_available:
         transcript_state = "available" if transcript_segments else ("no speech in selected range" if focused and all_segments else "no speech")
     for error in errors:
-        print(f"[watch] {error}", file=sys.stderr)
+        print(f"[watch] {untrusted_line(error, 1000)}", file=sys.stderr)
 
     info = dl.get("info") or {}
 
     print()
     print("# watch: video report")
     print()
-    print(f"- **Source:** {args.source}")
+    print(f"- **Source:** {untrusted_line(args.source, 500)}")
     if video_path:
         print(f"- **Local media:** `{video_path}`")
     if visual_error:
-        print(f"- **Visual status:** {visual_error}")
+        print(f"- **Visual status:** {untrusted_line(visual_error, 1000)}")
     if errors:
         print("- **Result:** partial evidence" if frames or transcript_segments else "- **Result:** unavailable evidence")
     if info.get("title"):
-        print(f"- **Title:** {info['title']}")
+        print(f"- **Title (untrusted):** {untrusted_line(info['title'])}")  # LOCAL PATCH
     if info.get("uploader"):
-        print(f"- **Uploader:** {info['uploader']}")
+        print(f"- **Uploader (untrusted):** {untrusted_line(info['uploader'])}")  # LOCAL PATCH
     print(f"- **Duration:** {format_time(full_duration)} ({full_duration:.1f}s)")
     if focused:
         print(
@@ -346,7 +353,7 @@ def main() -> int:
         in_range = " in range" if focused else ""
         print(
             f"- **Transcript:** {len(transcript_segments)} segments{in_range} "
-            f"(via {transcript_source or 'captions'})"
+            f"(via {untrusted_line(transcript_source or 'captions')})"
         )
     else:
         print(f"- **Transcript:** {transcript_state}")
@@ -396,15 +403,14 @@ def main() -> int:
     print("## Transcript")
     print()
     if transcript_text:
-        label = transcript_source or "captions"
+        label = untrusted_line(transcript_source or "captions")
         if focused:
             print(f"_Source: {label}. Filtered to {format_time(effective_start)} → {format_time(effective_end)}:_")
         else:
             print(f"_Source: {label}._")
         print()
-        print("```")
-        print(transcript_text)
-        print("```")
+        # LOCAL PATCH: captions/speech are creator-controlled; fence them so they cannot forge sections.
+        print(untrusted_block(transcript_text, "transcript"))
     else:
         print(f"_{transcript_state.capitalize()}._")
         if detail == "transcript" and not track_available:
@@ -413,7 +419,7 @@ def main() -> int:
         print()
         print("## Unavailable evidence")
         for error in errors:
-            print(f"- {error}")
+            print(f"- {untrusted_line(error, 1000)}")
 
     print()
     print("---")

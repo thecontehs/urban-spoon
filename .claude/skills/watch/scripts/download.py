@@ -2,14 +2,17 @@
 """Bounded captions and isolated per-run media downloads through yt-dlp."""
 from __future__ import annotations
 
+import ipaddress
 import json
+import os
 import re
+import socket
 import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
-from runtime import configure_stdio, diagnostic, run_text
+from runtime import configure_stdio, diagnostic, run_bounded, run_text
 
 VIDEO_EXTS = {'.mp4', '.mkv', '.webm', '.mov', '.m4v', '.avi', '.flv', '.wmv'}
 
@@ -30,6 +33,73 @@ FORBIDDEN_YTDLP_OPTIONS = (
 # from re-enabling the vectors above; proxies still come from HTTP(S)_PROXY env vars.
 HARDENING_ARGS = ['--ignore-config', '--no-plugin-dirs', '--no-exec']
 _YTDLP_VERSION_OK: str | None = None
+# LOCAL PATCH: download bounds. A media URL can stream forever or be a live broadcast; yt-dlp's
+# --max-filesize is not enforced when the server sends no Content-Length, so run_bounded also
+# watches bytes on disk and kills the yt-dlp process group.
+DEFAULT_MAX_DOWNLOAD_MB = 500
+DEFAULT_MAX_DURATION = 1800  # seconds of source video
+DEFAULT_DOWNLOAD_TIMEOUT = 900  # seconds, media stage
+METADATA_TIMEOUT = 180  # seconds, metadata and caption stages
+SOCKET_TIMEOUT = 30
+
+
+def ytdlp_argv(executable: str, *args: str) -> list[str]:
+    """LOCAL PATCH: the only way this skill builds a yt-dlp argv (a test enforces it)."""
+    return [executable, *HARDENING_ARGS, *args]
+
+
+def _limit(name: str, default: float) -> float:
+    value = os.environ.get(name, '').strip()
+    if not value:
+        return default
+    try:
+        number = float(value)
+        if not number > 0 or number != number or number == float('inf'):
+            raise ValueError()
+        return number
+    except ValueError:
+        raise SystemExit(f'{name} must be a positive number.') from None
+
+
+def limits() -> dict:
+    """LOCAL PATCH: current download bounds (environment overrides)."""
+    return {'max_bytes': int(_limit('WATCH_MAX_DOWNLOAD_MB', DEFAULT_MAX_DOWNLOAD_MB) * 1_000_000),
+            'max_duration': int(_limit('WATCH_MAX_DURATION', DEFAULT_MAX_DURATION)),
+            'timeout': _limit('WATCH_DOWNLOAD_TIMEOUT', DEFAULT_DOWNLOAD_TIMEOUT)}
+
+
+def private_network_allowed() -> bool:
+    return os.environ.get('WATCH_ALLOW_PRIVATE_NETWORK') == '1'
+
+
+def _forbidden_ip(address: str) -> bool:
+    ip = ipaddress.ip_address(address.split('%', 1)[0])
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return (ip.is_loopback or ip.is_link_local or ip.is_private or ip.is_reserved or ip.is_multicast
+            or ip.is_unspecified or not ip.is_global)
+
+
+def check_destination(url: str) -> None:
+    """LOCAL PATCH (SSRF): refuse URLs whose host is or resolves to a non-public address."""
+    if private_network_allowed():
+        return
+    host = urlparse(url).hostname
+    if not host:
+        raise SystemExit('URL has no host.')
+    try:
+        addresses = [str(ipaddress.ip_address(host))]
+    except ValueError:
+        try:
+            addresses = sorted({info[4][0] for info in socket.getaddrinfo(host, None)})
+        except (socket.gaierror, UnicodeError, OSError):
+            # Not resolvable here: a direct connection is impossible too; an HTTP(S) proxy resolves it
+            # remotely. Redirects and proxy-side resolution are residual risks (docs/SECURITY_REVIEW.md).
+            return
+    blocked = [a for a in addresses if _forbidden_ip(a)]
+    if blocked:
+        raise SystemExit(f'Refusing to fetch {host}: it resolves to a non-public address ({blocked[0]}). '
+                         'Use --allow-private-network (or WATCH_ALLOW_PRIVATE_NETWORK=1) only for hosts you trust.')
 
 
 def is_url(source: str) -> bool:
@@ -68,7 +138,7 @@ def check_ytdlp_version(executable: str = 'yt-dlp') -> str:
     minimum = '.'.join(f'{part:02d}' if i else str(part) for i, part in enumerate(MIN_YTDLP_VERSION))
     hint = (f'Upgrade to yt-dlp >= {minimum} (this repo pins one in requirements.txt: '
             'pip install -r requirements.txt, or pipx upgrade yt-dlp / brew upgrade yt-dlp).')
-    result = run_text([executable, '--ignore-config', '--version'], timeout=30)
+    result = run_text(ytdlp_argv(executable, '--version'), timeout=30)
     raw = (result.stdout or '').strip()
     version = parse_ytdlp_version(raw) if result.returncode == 0 else None
     if version is None:
@@ -87,7 +157,8 @@ def assert_safe_args(cmd: list[str]) -> None:
         # Values of -o/--sub-langs/etc. are never option names; only inspect option-like tokens.
         if i and options[i - 1] in ('-o', '--output', '--cookies', '--cookies-from-browser', '--load-info-json',
                                     '--print-to-file', '-f', '--sub-langs', '--sub-format', '--convert-subs',
-                                    '--merge-output-format', '-N'):
+                                    '--merge-output-format', '-N', '--socket-timeout', '--max-filesize',
+                                    '--match-filter'):
             continue
         name = arg.split('=', 1)[0]
         if name in FORBIDDEN_YTDLP_OPTIONS:
@@ -100,10 +171,10 @@ def assert_safe_args(cmd: list[str]) -> None:
 def _common(directory: Path, auth: list[str]) -> list[str]:
     # Escape literal percent signs in the directory, while retaining template fields.
     prefix = str(directory.resolve()).replace('%', '%%')
-    return ['yt-dlp', *HARDENING_ARGS, '--no-playlist', '--no-simulate', *auth,
+    return ytdlp_argv('yt-dlp', '--no-playlist', '--no-simulate', '--socket-timeout', str(SOCKET_TIMEOUT), *auth,
             '-o', f'{prefix}/video.%(ext)s',
             '-o', f'subtitle:{prefix}/video.%(ext)s',
-            '-o', f'infojson:{prefix}/video.%(ext)s']
+            '-o', f'infojson:{prefix}/video.%(ext)s')
 
 
 def network_diagnostic(stderr: str) -> str:
@@ -135,7 +206,14 @@ def _run(cmd: list[str]):
     # LOCAL PATCH: version floor and argv hardening run before every real yt-dlp invocation.
     assert_safe_args(cmd)
     check_ytdlp_version(cmd[0])
-    result = run_text(cmd)
+    # LOCAL PATCH: bounded run. The media stage (it carries --max-filesize) gets the byte cap and the
+    # media timeout, measured on the run directory named by the first -o template.
+    run_dir = Path(cmd[cmd.index('-o') + 1].rsplit('/video.', 1)[0].replace('%%', '%')) if '-o' in cmd else None
+    if '--max-filesize' in cmd:
+        bounds = limits()
+        result = run_bounded(cmd, timeout=bounds['timeout'], watch_dir=run_dir, max_bytes=bounds['max_bytes'])
+    else:
+        result = run_bounded(cmd, timeout=METADATA_TIMEOUT)
     if result.returncode != 0:
         raise SystemExit(f'yt-dlp failed (exit {result.returncode}): {network_diagnostic(result.stderr)}')
     return result
@@ -206,9 +284,14 @@ def fetch_captions(url: str, out_dir: Path, *, sub_lang='auto', cookies_file=Non
     result = {'video_path': None, 'subtitle_path': None, 'info': {'url': url}, 'downloaded': False,
               'run_dir': str(run), 'info_path': None, 'caption_track': None, 'errors': []}
     try:
+        check_destination(url)  # LOCAL PATCH (SSRF)
         _run([*_common(run, auth), '--skip-download', '--write-info-json', '--no-write-subs', '--no-write-auto-subs', '--', url])
         info = _read_metadata(info_path)
         result.update(info=_summary(info, url), info_path=str(info_path))
+        refusal = _refusal(info)  # LOCAL PATCH: live or over-long sources are not downloaded
+        if refusal:
+            result['refused'] = refusal
+            raise SystemExit(refusal)
         track = select_caption(info, sub_lang)
         if not track:
             return result
@@ -230,22 +313,55 @@ def fetch_captions(url: str, out_dir: Path, *, sub_lang='auto', cookies_file=Non
     return result
 
 
+def _refusal(info: dict) -> str | None:
+    """LOCAL PATCH: refuse live/upcoming streams and videos longer than WATCH_MAX_DURATION."""
+    if info.get('is_live') or info.get('live_status') in ('is_live', 'is_upcoming'):
+        return 'Refusing to download a live or upcoming stream (unbounded). Evaluate a finished upload instead.'
+    duration, cap = info.get('duration'), limits()['max_duration']
+    if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > cap:
+        return (f'Refusing to download: duration {int(duration)}s exceeds WATCH_MAX_DURATION={cap}s. '
+                'Raise the limit deliberately if this long video is really needed.')
+    return None
+
+
+def _remove_partials(run: Path) -> None:
+    for pattern in ('*.part', '*.part-Frag*', '*.ytdl', '*.temp.*'):
+        for leftover in run.glob(pattern):
+            try:
+                leftover.unlink()
+            except OSError:
+                pass
+
+
 def download_url(url: str, out_dir: Path, audio_only: bool = False, *, context=None,
                  cookies_file=None, cookies_from_browser=None) -> dict:
     auth = auth_args(cookies_file, cookies_from_browser)
     context = context or {}
+    if context.get('refused'):  # LOCAL PATCH
+        raise SystemExit(context['refused'])
+    check_destination(url)  # LOCAL PATCH (SSRF)
+    bounds = limits()
     run = Path(context['run_dir']) if context.get('run_dir') else _new_run(out_dir)
     record = run / 'final-path.jsonl'
     record.unlink(missing_ok=True)
     fmt = 'ba/bestaudio' if audio_only else 'bv*[height<=720]+ba/b[height<=720]/bv+ba/b'
     cmd = [*_common(run, auth), '-N', '8', '-f', fmt, '--merge-output-format', 'mp4',
            '--no-ignore-errors', '--no-write-subs', '--no-write-auto-subs', '--write-info-json',
-           '--print-to-file', 'after_move:%(filepath)j', str(record).replace('%', '%%')]
+           '--print-to-file', 'after_move:%(filepath)j', str(record).replace('%', '%%'),
+           # LOCAL PATCH: size, live and duration bounds (run_bounded also enforces the byte cap).
+           '--max-filesize', f"{bounds['max_bytes'] // 1_000_000}M",
+           '--match-filter', f"!is_live & duration <=? {bounds['max_duration']}"]
     if context.get('info_path'):
         cmd += ['--load-info-json', context['info_path']]
     else:
         cmd += ['--', url]
-    _run(cmd)
+    try:
+        completed = _run(cmd)
+    except SystemExit:
+        _remove_partials(run)
+        raise
+    if 'does not pass filter' in f'{completed.stdout}{completed.stderr}':
+        raise SystemExit('Refusing to download: the source is live or longer than WATCH_MAX_DURATION.')
     try:
         lines = record.read_text(encoding='utf-8').splitlines()
         if len(lines) != 1:

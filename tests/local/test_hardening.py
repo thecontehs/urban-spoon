@@ -111,7 +111,7 @@ def test_every_stage_passes_hardening(monkeypatch, tmp_path):
     seen = []
     def fake_run_text(cmd, **kw):
         seen.append(cmd)
-        if cmd[1:] == ['--ignore-config', '--version']:
+        if cmd[-1] == '--version':
             return subprocess.CompletedProcess(cmd, 0, '2026.08.19\n', '')
         template = cmd[cmd.index('-o') + 1]
         directory = Path(template.rsplit('/video.', 1)[0].replace('%%', '%'))
@@ -125,12 +125,17 @@ def test_every_stage_passes_hardening(monkeypatch, tmp_path):
             Path(cmd[cmd.index('--print-to-file') + 2].replace('%%', '%')).write_text(json.dumps(str(media)) + '\n')
         return subprocess.CompletedProcess(cmd, 0, '', '')
     monkeypatch.setattr(download, 'run_text', fake_run_text)
+    monkeypatch.setattr(download, 'run_bounded', lambda cmd, **kw: fake_run_text(cmd))
     result = download.fetch_captions(URL, tmp_path)
     download.download_url(URL, tmp_path, context=result)
     stages = [c for c in seen if '--version' not in c]
     assert len(stages) == 3
     for cmd in stages:
         assert cmd[1:4] == ['--ignore-config', '--no-plugin-dirs', '--no-exec']
+        assert '--socket-timeout' in cmd
+    media = stages[-1]
+    assert media[media.index('--max-filesize') + 1] == '500M'
+    assert media[media.index('--match-filter') + 1] == '!is_live & duration <=? 1800'
     assert sum('--version' in c for c in seen) == 1  # version is checked once per process
 
 
