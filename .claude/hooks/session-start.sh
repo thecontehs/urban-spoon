@@ -2,7 +2,9 @@
 # SessionStart hook: install pinned Python dependencies for the watch skill in
 # Claude Code cloud sessions. Local sessions are left alone (exit 0 immediately).
 # Idempotent: skips pip when requirements are unchanged since the last success.
+# Never blocks or fails the session: any error prints a note to stderr and exits 0.
 set -euo pipefail
+trap 'echo "urban-spoon session-start: setup step failed (line $LINENO); continuing without it. Run scripts/preflight.py to see what is missing." >&2; exit 0' ERR
 
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
