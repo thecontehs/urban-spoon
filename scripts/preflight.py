@@ -40,7 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 WATCH_SCRIPTS = REPO_ROOT / '.claude' / 'skills' / 'watch' / 'scripts'
 
 # Keep in sync with .claude/skills/watch/scripts/download.py (a test enforces this).
-MIN_YTDLP_VERSION = (2026, 6, 9)
+MIN_YTDLP_VERSION = (2026, 7, 4)
 
 # Platform -> hosts that a real fetch needs. CDN hosts vary per video; these are
 # representative entry points, so "reachable" here is necessary, not sufficient.

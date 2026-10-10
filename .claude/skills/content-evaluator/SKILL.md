@@ -40,7 +40,7 @@ Read `references/brand-context.md`. If it still contains `STATUS: UNFILLED`, tel
 python3 "SKILL_DIR/../../../scripts/preflight.py" --json
 ```
 
-Exit codes: `0` ready; `3` local tools fine but no social platform reachable; `4` tools missing or yt-dlp below the 2026.06.09 security floor; `2` usage error.
+Exit codes: `0` ready; `3` local tools fine but no social platform reachable; `4` tools missing or yt-dlp below the 2026.07.04 security floor; `2` usage error.
 
 - Map each URL to its platform and check `capabilities.url_watch_local_engine.<platform>`.
 - `blocked_by_proxy`: the environment's network allowlist blocks it. Tell the user which domains to allow (README "Network access") and stop for that URL. Do not try workarounds (other mirrors, downloader sites, disabling TLS).

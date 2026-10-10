@@ -13,16 +13,18 @@ from runtime import configure_stdio, diagnostic, run_text
 
 VIDEO_EXTS = {'.mp4', '.mkv', '.webm', '.mov', '.m4v', '.avi', '.flv', '.wmv'}
 
-# LOCAL PATCH (urban-spoon, see ../UPSTREAM.md): minimum yt-dlp release. 2026.06.09 fixes
-# CVE-2026-50574 (aria2c argument injection), CVE-2026-50023 and CVE-2026-50019; older
-# fixes (CVE-2026-26331, CVE-2025-54072) are included too.
-MIN_YTDLP_VERSION = (2026, 6, 9)
+# LOCAL PATCH (urban-spoon, see ../UPSTREAM.md): minimum yt-dlp release. 2026.07.04 fixes
+# CVE-2026-55404 (--write-link shortcut injection); 2026.06.09 fixed CVE-2026-50574 (aria2c
+# argument injection), CVE-2026-50023, CVE-2026-50019 and GHSA-69qj-pvh9-c5wg (--exec
+# template injection); older fixes (CVE-2026-26331, CVE-2025-54072) are included too.
+MIN_YTDLP_VERSION = (2026, 7, 4)
 # LOCAL PATCH: options that run external programs, load extra config/plugins, or hand the
 # transfer to an external downloader. watch never needs them; refuse if any appear in argv.
 FORBIDDEN_YTDLP_OPTIONS = (
     '--exec', '--exec-before-download', '--downloader', '--external-downloader',
     '--downloader-args', '--external-downloader-args', '--netrc-cmd', '--config-locations',
     '--plugin-dirs', '--use-postprocessor', '--update', '-U', '--update-to', '--batch-file', '-a',
+    '--write-link', '--write-url-link', '--write-webloc-link', '--write-desktop-link',
 )
 # LOCAL PATCH: always prepended. --ignore-config stops user/system/portable yt-dlp config files
 # from re-enabling the vectors above; proxies still come from HTTP(S)_PROXY env vars.
@@ -73,7 +75,7 @@ def check_ytdlp_version(executable: str = 'yt-dlp') -> str:
         raise SystemExit(f'Cannot determine the yt-dlp version (got {raw[:40]!r}); refusing to run. {hint}')
     if version < MIN_YTDLP_VERSION:
         raise SystemExit(f'yt-dlp {raw} is older than {minimum} and has known security vulnerabilities '
-                         f'(CVE-2026-50574, CVE-2026-50023, CVE-2026-50019); refusing to run. {hint}')
+                         f'(e.g. CVE-2026-55404, CVE-2026-50574, CVE-2026-50023, CVE-2026-50019); refusing to run. {hint}')
     _YTDLP_VERSION_OK = raw
     return raw
 

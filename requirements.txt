@@ -1,7 +1,7 @@
 # Runtime dependencies for the watch skill (the skill's own Python code is stdlib-only).
 # Every package is pinned, including transitive ones. Install wheels only:
 #   pip install --only-binary=:all: -r requirements.txt
-# yt-dlp must stay >= 2026.06.09 (security floor enforced by download.py); bump deliberately.
+# yt-dlp must stay >= 2026.07.04 (security floor enforced by download.py); bump deliberately.
 yt-dlp[default,curl-cffi]==2026.8.19
 yt-dlp-ejs==0.8.0
 # Deno is the JavaScript runtime yt-dlp uses for YouTube challenges (official PyPI wheel).

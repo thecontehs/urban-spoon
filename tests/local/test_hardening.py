@@ -37,16 +37,17 @@ def test_parse_version(text, expected):
     assert download.parse_ytdlp_version(text) == expected
 
 
-@pytest.mark.parametrize('version', ['2026.06.08', '2025.12.31', '2026.02.21'])
+# 2026.06.09 is refused: pip-audit/OSV lists CVE-2026-55404 (fixed in 2026.07.04) against it.
+@pytest.mark.parametrize('version', ['2026.07.03', '2026.06.09', '2026.06.08', '2025.12.31', '2026.02.21'])
 def test_old_ytdlp_is_refused_with_upgrade_hint(tmp_path, version):
     with pytest.raises(SystemExit) as err:
         download.check_ytdlp_version(fake_ytdlp(tmp_path, version))
     message = str(err.value)
-    assert 'older than 2026.06.09' in message and 'refusing' in message
+    assert 'older than 2026.07.04' in message and 'refusing' in message
     assert 'requirements.txt' in message and 'Upgrade' in message
 
 
-@pytest.mark.parametrize('version', ['2026.06.09', '2026.08.19', '2027.01.01.123'])
+@pytest.mark.parametrize('version', ['2026.07.04', '2026.08.19', '2027.01.01.123'])
 def test_new_enough_ytdlp_is_accepted(tmp_path, version):
     assert download.check_ytdlp_version(fake_ytdlp(tmp_path, version)) == version
 
@@ -76,7 +77,7 @@ def test_preflight_floor_matches_download_floor():
 # --- Patch b: --ignore-config and forbidden options ---------------------------------------
 
 def test_common_args_carry_hardening():
-    cmd = download._common(Path('/tmp/x'), [])
+    cmd = download._common(Path('work-dir'), [])
     assert cmd[0] == 'yt-dlp' and cmd[1:4] == ['--ignore-config', '--no-plugin-dirs', '--no-exec']
     download.assert_safe_args([*cmd, '--', URL])
 
@@ -84,11 +85,12 @@ def test_common_args_carry_hardening():
 @pytest.mark.parametrize('bad', [
     ['--exec', 'touch x'], ['--exec=touch x'], ['--exec-before-download', 'x'],
     ['--downloader', 'aria2c'], ['--external-downloader', 'aria2c'], ['--downloader=aria2c'],
-    ['--downloader-args', 'aria2c:--foo'], ['--netrc-cmd', 'x'], ['--config-locations', '/tmp/c'],
-    ['--plugin-dirs', '/tmp/p'], ['--use-postprocessor', 'X'], ['-U'], ['--update-to', 'nightly'],
+    ['--downloader-args', 'aria2c:--foo'], ['--netrc-cmd', 'x'], ['--config-locations', 'cfgdir'],
+    ['--plugin-dirs', 'plugdir'], ['--use-postprocessor', 'X'], ['-U'], ['--update-to', 'nightly'],
+    ['--write-link'], ['--write-desktop-link'], ['--write-url-link'], ['--write-webloc-link'],
 ])
 def test_forbidden_options_are_refused(bad):
-    cmd = [*download._common(Path('/tmp/x'), []), *bad, '--', URL]
+    cmd = [*download._common(Path('work-dir'), []), *bad, '--', URL]
     with pytest.raises(SystemExit, match='Refusing'):
         download.assert_safe_args(cmd)
 
@@ -99,7 +101,7 @@ def test_missing_ignore_config_is_refused():
 
 
 def test_option_like_values_and_url_are_not_misread():
-    cmd = [*download._common(Path('/tmp/x'), ['--no-cookies-from-browser', '--cookies', '--exec']),
+    cmd = [*download._common(Path('work-dir'), ['--no-cookies-from-browser', '--cookies', '--exec']),
            '-f', '--downloader', '--', '--exec']
     download.assert_safe_args(cmd)
 
@@ -234,5 +236,5 @@ def test_remote_uv_installer_runs_with_opt_in(monkeypatch):
 def test_setup_json_reports_security_floor():
     need('yt-dlp', 'ffmpeg', 'ffprobe')
     status = watch_setup._status(detailed=True)
-    assert status['ytdlp_security']['min_version'] == '2026.06.09'
+    assert status['ytdlp_security']['min_version'] == '2026.07.04'
     assert status['ytdlp_security']['version_ok'] is True

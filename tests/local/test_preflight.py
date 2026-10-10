@@ -41,7 +41,7 @@ def test_group_summary():
 
 def _tools(monkeypatch, *, ytdlp_ok=True, ffmpeg=True, deno=True):
     monkeypatch.setattr(preflight, 'check_ytdlp', lambda: {'present': True, 'path': '/x', 'version': '2026.08.19',
-                                                            'min_version': '2026.06.09', 'version_ok': ytdlp_ok,
+                                                            'min_version': '2026.07.04', 'version_ok': ytdlp_ok,
                                                             'js_runtimes': 'deno', 'ejs': True})
     def binary(name, flag):
         present = {'ffmpeg': ffmpeg, 'ffprobe': ffmpeg, 'deno': deno}[name]
