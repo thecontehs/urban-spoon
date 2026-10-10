@@ -39,8 +39,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WATCH_SCRIPTS = REPO_ROOT / '.claude' / 'skills' / 'watch' / 'scripts'
 
-# Keep in sync with .claude/skills/watch/scripts/download.py (a test enforces this).
+# Keep in sync with .claude/skills/watch/scripts/download.py (tests enforce both).
 MIN_YTDLP_VERSION = (2026, 7, 4)
+YTDLP_HARDENING_ARGS = ['--ignore-config', '--no-plugin-dirs', '--no-exec']
+
+
+def ytdlp_argv(executable: str, *args: str) -> list[str]:
+    """Every yt-dlp probe goes through here: no config files, no plugins, no --exec."""
+    return [executable, *YTDLP_HARDENING_ARGS, *args]
 
 # Platform -> hosts that a real fetch needs. CDN hosts vary per video; these are
 # representative entry points, so "reachable" here is necessary, not sufficient.
@@ -81,17 +87,17 @@ def fmt_version(version) -> str:
 
 
 def check_ytdlp() -> dict:
-    path = shutil.which('yt-dlp')
-    out = {'present': bool(path), 'path': path, 'version': None, 'min_version': fmt_version(MIN_YTDLP_VERSION),
+    ytdlp = shutil.which('yt-dlp')
+    out = {'present': bool(ytdlp), 'path': ytdlp, 'version': None, 'min_version': fmt_version(MIN_YTDLP_VERSION),
            'version_ok': False, 'js_runtimes': None, 'ejs': None}
-    if not path:
+    if not ytdlp:
         return out
-    code, text = _run([path, '--ignore-config', '--version'])
+    code, text = _run(ytdlp_argv(ytdlp, '--version'))
     version = parse_ytdlp_version(text.strip()) if code == 0 else None
     out['version'] = text.strip()[:40] if code == 0 else None
     out['version_ok'] = bool(version and version >= MIN_YTDLP_VERSION)
     # The verbose header lists JS runtimes and optional libraries without any network access.
-    _, verbose = _run([path, '--ignore-config', '-v'])
+    _, verbose = _run(ytdlp_argv(ytdlp, '-v'))
     runtimes = re.search(r'\[debug\] JS runtimes: (.*)', verbose)
     out['js_runtimes'] = runtimes.group(1).strip() if runtimes else None
     libs = re.search(r'\[debug\] Optional libraries: (.*)', verbose)

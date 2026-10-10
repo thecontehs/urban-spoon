@@ -167,10 +167,13 @@ def _status(detailed=False):
               'whisperx_model': cfg['whisperx_model'], 'config_file': str(CONFIG_FILE),
               'watch_detail': cfg['detail'], 'platform': platform.system()}
     if detailed:
+        from download import ytdlp_argv
         tools = {}
         for name in REQUIRED_BINARIES:
             path = _which(name)
-            tools[name] = {'path': path, **(_probe([path, '--version' if name == 'yt-dlp' else '-version']) if path else {'ok': False})}
+            # LOCAL PATCH: yt-dlp probes go through download.ytdlp_argv (no config, no plugins).
+            argv = ytdlp_argv(path, '--version') if name == 'yt-dlp' else [path, '-version']
+            tools[name] = {'path': path, **(_probe(argv) if path else {'ok': False})}
         ytdlp = _which('yt-dlp')
         result['tools'] = tools
         # LOCAL PATCH: report the security version floor that download.py enforces.
@@ -182,7 +185,7 @@ def _status(detailed=False):
         result['youtube'] = {
             'deno': _which('deno'), 'node': _which('node'),
             'ejs': 'unknown (inspect the owning yt-dlp installation; no network probe)',
-            'impersonation': _probe([ytdlp, '--ignore-config', '--list-impersonate-targets']) if ytdlp else None,
+            'impersonation': _probe(ytdlp_argv(ytdlp, '--list-impersonate-targets')) if ytdlp else None,
             'update_hint': 'Update the owning package: brew upgrade yt-dlp; pipx upgrade yt-dlp; or winget upgrade --id yt-dlp.yt-dlp --exact. Verify the executable path above.',
         }
     return result
