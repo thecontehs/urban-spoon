@@ -28,7 +28,13 @@ Build environment reachability, measured with `python3 scripts/preflight.py` on 
 | Proxy-block detection (preflight and watch diagnostics) | Verified-here | Preflight run above; yt-dlp error text for tiktok.com captured live and used in `test_proxy_connect_403_is_not_reported_as_ytdlp_bug` |
 | Engagement metadata extraction (views, likes, comments) | Verified-offline | `tests/local/test_content_evaluator.py` on synthetic `info.json`. Which fields each platform actually provides: Pending-network |
 | Scoring rubric and scorecard | Verified-offline (structure only) | Weights sum to 100, verdicts and anchors present. The quality of real evaluations has not been tested on real videos |
-| SessionStart hook | Verified-here | Ran with `CLAUDE_CODE_REMOTE=true`: first run about 100 s, second run skipped pip (0.01 s), local mode exits 0 immediately |
+| yt-dlp HTTP download of the synthetic clip from a local server (`--allow-private-network`) | Verified-here | `test_watch_cli_downloads_over_http_with_flag` (real yt-dlp, 127.0.0.1) |
+| Download bounds: byte cap on an endless stream, timeout on a trickle stream, process-group kill, child dies with killed parent | Verified-here | `tests/local/test_download_bounds.py` with real yt-dlp against local servers (Linux). macOS/Windows: Not tested |
+| Live / over-long source refusal | Verified-offline | Unit tests on metadata dicts; no real live stream was available |
+| Non-public destinations refused (SSRF) | Verified-here | 15 address forms refused, CLI refusal against a real local server; redirect/rebinding cases: Not tested (residual) |
+| Report sanitization (forged title, transcript, Gemini answer) | Verified-offline | `tests/local/test_report_safety.py` |
+| No plugin loading in any yt-dlp call, including probes | Verified-here | Real planted plugin in `~/.config/yt-dlp/plugins` (control run loads it), logging fake yt-dlp, AST scan |
+| SessionStart hook | Verified-here | Ran with `CLAUDE_CODE_REMOTE=true`: first run about 100 s, second run skipped pip (0.01 s), local mode exits 0 immediately; failure modes (unwritable home, missing python3) exit 0 with a note (`tests/local/test_session_hook.py`) |
 | Gemini engine (YouTube URL or uploaded file) | Needs-key | Host reachable here; no key. Upstream mocked tests pass |
 | Groq / OpenAI transcription fallback | Needs-key + Pending-network | Hosts blocked here; upstream mocked tests pass |
 | WhisperX local transcription | Not tested | Install needs Hugging Face (blocked) and the opt-in in `UPSTREAM.md` patch 3 |
@@ -50,16 +56,18 @@ Build environment reachability, measured with `python3 scripts/preflight.py` on 
 
 When a platform is verified, replace its cells with Verified-here plus the date, URL type (not necessarily the URL), and which modalities came back (frames, captions manual/auto, metadata fields).
 
-## Test results (2026-10-10, build environment)
+## Test results (2026-10-10, build environment, revision 2)
 
 All commands run from the repo root with the pinned venv on `PATH` (`requirements-dev.txt`).
 
 | Command | Result |
 |---|---|
 | `python -m pytest tests/upstream -q` | 244 passed, 5 skipped (plugin hook and manifest tests: files not vendored) |
-| `python -m pytest tests/local -q` | 85 passed, 2 skipped (live tests, opt-in) |
-| `python -m pytest -q` | 329 passed, 7 skipped |
-| `LIVE_TESTS=1 python -m pytest -m live -q` | 2 passed (generic direct-media URL download; pypi.org reachability) |
+| `python -m pytest tests/local -q` | 148 passed, 2 skipped (live tests, opt-in) |
+| `python -m pytest -q` | 392 passed, 7 skipped |
+| `LIVE_TESTS=1 python -m pytest -m live -q` | 2 passed (generic direct-media URL download from raw.githubusercontent.com; pypi.org reachability) |
 | Upstream suite before any local patch (path changes only) | 244 passed, 5 skipped |
 
-`tests/local` breakdown: `test_hardening.py` 57, `test_preflight.py` 15 (1 live), `test_e2e_synthetic.py` 5 (1 live), `test_content_evaluator.py` 10.
+`tests/local` breakdown: `test_hardening.py` 57, `test_download_bounds.py` 34, `test_preflight.py` 15 (1 live), `test_content_evaluator.py` 15, `test_report_safety.py` 11, `test_ytdlp_invocations.py` 8, `test_e2e_synthetic.py` 5 (1 live), `test_session_hook.py` 5.
+
+Revision 1 (before the red-team fixes) recorded 329 passed, 7 skipped.

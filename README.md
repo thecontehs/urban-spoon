@@ -42,7 +42,7 @@ python3 scripts/preflight.py                      # what can this machine do?
 
 ### Claude Code on the web (cloud sessions)
 
-`.claude/settings.json` registers `.claude/hooks/session-start.sh` as a SessionStart hook. When `CLAUDE_CODE_REMOTE=true` it creates a venv at `~/.cache/urban-spoon/venv` (outside the repo), installs `requirements-dev.txt` with exact pins and wheels only, records a hash so later sessions skip pip, and adds the venv to `PATH` through `CLAUDE_ENV_FILE`. It never blocks the session: on failure it logs to `~/.cache/urban-spoon/session-start.log` and exits 0, and `preflight.py` reports what is missing. Locally the hook does nothing.
+`.claude/settings.json` registers `.claude/hooks/session-start.sh` as a SessionStart hook. When `CLAUDE_CODE_REMOTE=true` it creates a venv at `~/.cache/urban-spoon/venv` (outside the repo), installs `requirements-dev.txt` with exact pins and wheels only, records a hash so later sessions skip pip, and adds the venv to `PATH` through `CLAUDE_ENV_FILE`. It never blocks the session: any failing step (including an unwritable home or a missing `python3`) prints a one-line note to stderr and exits 0, pip output goes to `~/.cache/urban-spoon/session-start.log`, and `preflight.py` reports what is missing. The hook is registered with a 300 s timeout. Locally the hook does nothing.
 
 First run took about 100 s in the build container; later runs take milliseconds.
 
@@ -50,17 +50,17 @@ First run took about 100 s in the build container; later runs take milliseconds.
 
 By default a cloud environment's network policy may block video platforms. The preflight reports this as `blocked_by_proxy`. To allow them, edit your environment's network access settings as described in the Claude Code docs: <https://code.claude.com/docs/en/cloud-environments#network-access>.
 
-Domains to allow, by platform (CDN hosts change; if a download still fails, the yt-dlp error names the blocked host):
+Domains to allow, by platform. Entry hosts come from yt-dlp 2026.8.19's extractor sources (`yt_dlp/extractor/{youtube,tiktok,instagram,twitter,vimeo,facebook,reddit,linkedin}`); media CDN hosts are not listed in extractor code and change over time, so if a download still fails, the yt-dlp error names the blocked host:
 
 | Platform | Domains |
 |---|---|
 | YouTube | `youtube.com`, `*.youtube.com`, `youtu.be`, `*.googlevideo.com`, `*.ytimg.com`, `*.ggpht.com` |
-| TikTok | `tiktok.com`, `*.tiktok.com`, `*.tiktokcdn.com`, `*.tiktokcdn-us.com`, `*.tiktokv.com`, `*.byteoversea.com`, `*.ibytedtos.com` |
-| Instagram | `instagram.com`, `*.instagram.com`, `*.cdninstagram.com`, `*.fbcdn.net` |
-| Facebook | `facebook.com`, `*.facebook.com`, `fb.watch`, `*.fbcdn.net` |
-| X / Twitter | `x.com`, `twitter.com`, `api.x.com`, `api.twitter.com`, `video.twimg.com`, `pbs.twimg.com`, `abs.twimg.com` |
-| Vimeo | `vimeo.com`, `player.vimeo.com`, `*.vimeocdn.com` |
-| Reddit | `reddit.com`, `www.reddit.com`, `v.redd.it`, `i.redd.it` |
+| TikTok | `tiktok.com`, `*.tiktok.com` (covers `www`, `m`, `vm`, `vt`, `webcast`), `*.tiktokcdn.com`, `*.tiktokcdn-us.com`, `*.tiktokv.com` (API hosts such as `api16-normal-c-useast1a.tiktokv.com`), `*.byteoversea.com`, `*.ibytedtos.com` |
+| Instagram | `instagram.com`, `*.instagram.com` (covers `i.instagram.com`), `*.cdninstagram.com`, `*.fbcdn.net` |
+| Facebook | `facebook.com`, `*.facebook.com` (covers `m.facebook.com`), `fb.watch`, `*.fbcdn.net`, `lookaside.fbsbx.com` |
+| X / Twitter | `x.com`, `twitter.com`, `api.x.com`, `api.twitter.com`, `*.twimg.com` (covers `video.twimg.com`, `pbs.twimg.com`, `abs.twimg.com`, `amp.twimg.com`, `cdn.syndication.twimg.com`), `t.co` |
+| Vimeo | `vimeo.com`, `player.vimeo.com`, `api.vimeo.com`, `*.vimeocdn.com`, `vimeopro.com` |
+| Reddit | `reddit.com`, `www.reddit.com`, `old.reddit.com`, `v.redd.it`, `i.redd.it`, `*.redditmedia.com` |
 | LinkedIn | `linkedin.com`, `www.linkedin.com`, `*.licdn.com` |
 | Gemini engine (optional) | `generativelanguage.googleapis.com` |
 | Cloud transcription (optional) | `api.groq.com`, `api.openai.com` |
@@ -93,6 +93,18 @@ python3 .claude/skills/watch/scripts/watch.py "<url-or-local-file>" --engine loc
 
 See `.claude/skills/watch/SKILL.md` for all options and `.claude/skills/watch/UPSTREAM.md` for the local patches.
 
+Safety limits added locally (environment variables; raise them deliberately):
+
+| Setting | Default | Effect |
+|---|---|---|
+| `WATCH_MAX_DOWNLOAD_MB` | 500 | Media download is stopped (process group killed) past this many MB on disk |
+| `WATCH_MAX_DURATION` | 1800 | Videos longer than this many seconds are refused; live and upcoming streams are always refused |
+| `WATCH_DOWNLOAD_TIMEOUT` | 900 | Wall-clock seconds for the media stage (metadata and captions: 180 s) |
+| `--allow-private-network` / `WATCH_ALLOW_PRIVATE_NETWORK=1` | off | Allow URLs that resolve to loopback, private, link-local or reserved addresses |
+| `WATCH_ALLOW_REMOTE_INSTALLER=1` | off | Let WhisperX setup run the remote `uv` installer script (review first) |
+
+The report prints titles and uploaders as sanitized single lines labeled `(untrusted)` and puts transcripts and Gemini answers inside `<untrusted-...>` blocks. The `content-evaluator` skill runs watch with `--no-whisper` (no silent audio upload to Groq/OpenAI) and `--max-frames 40` (fewer per video in larger batches).
+
 ## Tests
 
 ```bash
@@ -104,7 +116,7 @@ Use the venv's Python (it has pytest from `requirements-dev.txt`). Current count
 
 ## Security
 
-See [`docs/SECURITY_REVIEW.md`](docs/SECURITY_REVIEW.md). Highlights: yt-dlp is pinned and the skill refuses anything older than 2026.07.04; yt-dlp config files, plugins and `--exec`/external downloaders are disabled; video content is treated as untrusted data, never instructions; the WhisperX installer path needs an explicit opt-in. Downloading videos may be restricted by platform terms of service and copyright; evaluate content you have the right to access, and do not repost others' work without permission.
+See [`docs/SECURITY_REVIEW.md`](docs/SECURITY_REVIEW.md). Highlights: yt-dlp is pinned and the skill refuses anything older than 2026.07.04; yt-dlp config files, plugins and `--exec`/external downloaders are disabled for every call, including probes; downloads are bounded in size, duration and time; non-public destinations are refused; creator-controlled text is sanitized and fenced in reports and treated as untrusted data, never instructions; cloud transcription needs consent; the WhisperX installer path needs an explicit opt-in. Downloading videos may be restricted by platform terms of service and copyright; evaluate content you have the right to access, and do not repost others' work without permission.
 
 ## Layout
 
@@ -116,7 +128,8 @@ See [`docs/SECURITY_REVIEW.md`](docs/SECURITY_REVIEW.md). Highlights: yt-dlp is 
   skills/content-evaluator/      SKILL.md, references/, scripts/metadata.py
 scripts/preflight.py             capability matrix (stdlib only)
 tests/upstream/                  upstream test suite (paths adjusted)
-tests/local/                     hardening, preflight, evaluator and offline E2E tests
+tests/local/                     hardening, download bounds/SSRF, report safety, yt-dlp
+                                 invocation, hook, preflight, evaluator and offline E2E tests
 docs/SECURITY_REVIEW.md
 docs/CAPABILITY_MATRIX.md
 requirements.txt, requirements-dev.txt

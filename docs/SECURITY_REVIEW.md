@@ -4,6 +4,8 @@ Scope: everything in this repo as of the commit that adds this file: the vendore
 
 Method: manual reading of every vendored Python file before running it (the upstream clone was treated as untrusted and never executed in place), `bandit` static analysis, `pip-audit` against the pinned requirements, an OSV cross-check of older yt-dlp releases, and behavioral tests with the real yt-dlp binary. Review date: 2026-10-10.
 
+Revision 2 (same day): an independent red-team review of revision 1 found the issues listed as R1 to R10 below. All were fixed with regression tests; each fix is a numbered local patch in `.claude/skills/watch/UPSTREAM.md` or a change to this repo's own files.
+
 ## Summary
 
 | ID | Finding | Severity | Status |
@@ -18,7 +20,17 @@ Method: manual reading of every vendored Python file before running it (the upst
 | S8 | Downloading platform videos may breach terms of service or copyright | Policy | Documented; residual |
 | S9 | Dependencies pinned by version but not by hash | Low | Wheels-only install; `pip-audit` clean; residual |
 | S10 | yt-dlp and ffmpeg parse untrusted remote content | Medium | Pinned current yt-dlp; system ffmpeg is the distro package; residual |
-| S11 | Downloaded media and frames persist in temp work dirs until deleted | Low | Skill tells Claude to delete its own work dirs; `.gitignore` excludes media; residual |
+| S11 | Downloaded media and frames persist in temp work dirs until deleted | Low | Skill tells Claude to delete its own work dirs (after a pattern check, R1); `.gitignore` excludes media; residual |
+| R1 (H1) | Report forgery: raw titles, uploaders, transcripts and Gemini answers could inject fake `## Frames` entries (e.g. `/root/.ssh/id_rsa`) and a fake `Work dir: /home/user` cleanup line | High | **Fixed** (patch 6 + skill rules: read only `.jpg` frames inside the Work dir, delete only a Work dir matching `watch-XXXXXXXX`) |
+| R2 (H2) | Unbounded downloads: endless or live media filled the disk; yt-dlp outlived a killed parent | High | **Fixed** (patch 7: socket timeout, size/live/duration filters, timeout + on-disk byte cap with process-group kill, child dies with parent on Linux) |
+| R3 (M1) = S5b | Silent cloud audio upload: with `--engine local`, `whisper` backend `auto` uploads audio to Groq/OpenAI if a key resolves from env, `~/.config/watch/.env` or `./.env` | Medium | **Mitigated** in `content-evaluator` (always `--no-whisper`; asks before `--whisper groq|openai`). Not changed in `watch` itself |
+| R4 (M2) | SSRF: loopback/private/link-local/reserved hosts accepted; `no_proxy` sends them around the proxy | Medium | **Fixed** (patch 8: refused unless `--allow-private-network`); redirect/rebinding residual |
+| R5 (M3) | Plugin loading in probes: `-v` and setup probes lacked `--no-plugin-dirs`; a planted plugin executed | Medium | **Fixed** (patch 9: single `ytdlp_argv` helper; AST test) |
+| R6 (M4) | Token budget: up to 100+ frames at 768 px per video | Medium | **Fixed** in evaluator (`--max-frames 40`, per-batch budget table) |
+| R7 (M5) | README allowlist missed hosts (`api.vimeo.com`, `*.twimg.com`, `lookaside.fbsbx.com`, `*.vimeocdn.com`, ...) | Low | **Fixed** (README; extractor sources grepped) |
+| R8 (L1, L2) | SessionStart hook could exit 1 on mkdir/venv failure; no hook timeout | Low | **Fixed** (ERR trap exits 0 with a note; `timeout: 300`) |
+| R9 (L3, L4) | Rubric contradictions (evidence vs. unobservable, confidence, rounding, brand provisional); `metadata.py` recursive glob from any dir | Low | **Fixed** |
+| R10 (L7) | Skill text told Claude to update yt-dlp on 403 | Low | **Fixed** (never self-update; updates via `requirements.txt`) |
 
 ## Known yt-dlp vulnerabilities
 
@@ -57,6 +69,26 @@ Tradeoff accepted: proxy settings must come from environment variables, and CA s
 
 With the Gemini engine, YouTube URLs are sent to Google and other videos are downloaded locally and uploaded to the Gemini Files API, then deleted (or expire after 48 hours). `engine=auto` picks Gemini whenever a key resolves from the environment, `~/.config/watch/.env`, or `./.env`. A `.env` in an untrusted working directory could therefore route a user's local video to a third party's Google project. The `content-evaluator` skill always passes `--engine local` and asks before using Gemini. The key is sent only as an `x-goog-api-key` header and redacted from errors (upstream code, read and confirmed). Gemini answers are treated as untrusted evidence.
 
+### S5b (R3): Silent cloud transcription upload
+
+`watch` picks a transcription fallback automatically (`WATCH_WHISPER_BACKEND=auto`) when a video has no captions: it uses a `GROQ_API_KEY` or `OPENAI_API_KEY` found in the environment, `~/.config/watch/.env` or `./.env`, and uploads extracted audio to that provider, even with `--engine local`. As with S5, a `.env` in an untrusted working directory could send audio to a third party. The `content-evaluator` skill always passes `--no-whisper` and asks the user before enabling `--whisper groq|openai` for a specific video. Direct use of `watch` without `--no-whisper` keeps upstream behavior (residual).
+
+### R1: Report forgery
+
+Creator-controlled strings were printed verbatim into a Markdown report that Claude then acts on (open frames, delete the work dir). Now every such string is either a single sanitized line labeled `(untrusted)` or sits inside an `<untrusted-...>` fenced block that its content cannot close. Independently, both skills tell Claude to read only `.jpg` paths inside the run's Work dir `frames/` and to delete only a Work dir whose name matches the `mkdtemp` pattern inside the expected parent. Residual: the model still reads the untrusted text; see S6.
+
+### R2: Download bounds
+
+yt-dlp's `--max-filesize` is not enforced for responses without `Content-Length` (reproduced: 16.6 GB in 60 s from a local endless server). Enforcement therefore happens outside yt-dlp: `run_bounded` polls the run directory every 0.2 s and kills the process group past the byte cap (default 500 MB; overshoot is bounded by about 0.2 s of transfer), and enforces a wall-clock timeout (default 900 s for media, 180 s for metadata). `--match-filter` and a metadata check refuse live/upcoming streams and videos over 1800 s. Residual: `PR_SET_PDEATHSIG` is Linux-only; on macOS/Windows a SIGKILLed watch leaves yt-dlp running until its own socket timeout or completion. Windows uses `process.kill()` (no process-group kill; untested). `--download-sections` is not used because it would shift frame timestamps.
+
+### R4: SSRF
+
+Before yt-dlp runs, the URL's host is resolved and every address must be global. Residual risks: an allowed public URL can redirect to a private address (yt-dlp follows redirects); DNS can change between our check and yt-dlp's resolution (rebinding); names that only a proxy can resolve are not checked locally. Cloud environments with an egress proxy reduce but do not remove these.
+
+### R5: Plugins in probes
+
+All yt-dlp invocations, including diagnostics, are built by `ytdlp_argv`, which always adds `--ignore-config --no-plugin-dirs --no-exec`. Verified with a real planted plugin. Plugins installed as `yt_dlp_plugins` packages inside the yt-dlp venv itself are outside this control (treat the venv as trusted; it is built from pinned requirements).
+
 ### S6: Prompt injection from video content
 
 Anything inside a video (burned-in text, speech, captions, title, description, tags) is attacker-controllable. Both skills instruct Claude to treat it as data, never instructions, to report manipulation attempts under Risk, and to never run commands suggested by content. `metadata.py` labels description and tags as untrusted and truncates them. Residual risk: instruction-following models can still be influenced by persuasive content; reviewers should sanity-check scores that look out of line with the evidence.
@@ -83,12 +115,14 @@ Command: `bandit -r .claude scripts` and `bandit -r tests`.
 
 | Scope | LOC | High | Medium | Low | Notes |
 |---|---|---|---|---|---|
-| Skills + scripts (`.claude`, `scripts`) | 2752 | 0 | 2 | 8 | Medium: B310 `urlopen` in `gemini.py:68` and `whisper.py:205`, both on hardcoded `https://` API endpoints (not user-controlled). Low: B404/B603 subprocess with argv lists, no `shell=True`. 3 findings suppressed with `# nosec` in `scripts/preflight.py` (B404, B603 on fixed argv; B310 on a fixed `https://` scheme with a regex-validated hostname) |
-| Tests (`tests`) | 2216 | 0 | 1 | 524 | Medium: B108 `/tmp` literal in upstream `test_gemini.py:58` (string fixture). Low: B101 asserts, subprocess in tests |
+| Skills + scripts (`.claude`, `scripts`) | 2983 | 0 | 2 | 9 | Medium: B310 `urlopen` in `gemini.py:68` and `whisper.py:205`, both on hardcoded `https://` API endpoints (not user-controlled). Low: B404/B603 subprocess with argv lists, no `shell=True` (one more B603 than revision 1: `runtime.run_bounded`). 3 findings suppressed with `# nosec` in `scripts/preflight.py` (B404, B603 on fixed argv; B310 on a fixed `https://` scheme with a regex-validated hostname) |
+| Tests (`tests`) | 2638 | 0 | 1 | 608 | Medium: B108 `/tmp` literal in upstream `test_gemini.py:58` (string fixture). Low: B101 asserts, subprocess in tests, one B105 (a fake key string used to prove keys never leak). A B613 (bidi control character) in a test string was fixed by using escape sequences |
 
 No `eval`, `exec`, `pickle`, `yaml.load`, `shell=True`, or `verify=False` anywhere in the repo's Python (grep and bandit).
 
 ## Dependency audit: pip-audit 2.10.1
+
+Re-run for revision 2 with the same results.
 
 | Input | Result |
 |---|---|
@@ -99,6 +133,9 @@ No `eval`, `exec`, `pickle`, `yaml.load`, `shell=True`, or `verify=False` anywhe
 | Cross-check: `yt-dlp==2025.6.30` | 6 distinct advisories (adds CVE-2026-26331) |
 
 ## Not reviewed or not tested
+
+- Redirect-based SSRF and DNS rebinding (R4 residual).
+- Download bounds and process cleanup on macOS and Windows (R2 residual).
 
 - Live downloads from any social platform (blocked by this container's network policy).
 - The Gemini engine end to end (no API key available; upstream's mocked tests pass).
